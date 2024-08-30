@@ -21,7 +21,7 @@
             position: absolute;
             width: 2px;
             z-index: 10;
-        } 
+        }
 
         .foreign-selection {
             position: absolute;
@@ -61,7 +61,10 @@
 
                 <input type="file" id="fileInput" class="btn btn-outline-primary me-2">
                 <button class="btn btn-outline-success me-2" id="downloadBtn">Download File</button>
-                <button class="btn btn-outline-secondary" id="darkModeToggle"><i class="bi bi-moon-stars-fill"></i></button>
+
+                <button class="btn btn-outline-secondary" id="darkModeToggle">
+                    <div><i id="themeIcon" class="bi bi-moon-stars-fill"></i></div>
+                </button>
                 <button class="btn btn-outline-primary ms-2" id="copyyLinkBtn"><i class="bi bi-link-45deg"></i></button>
             </div>
         </div>
@@ -69,6 +72,15 @@
 
     <!-- Text Editor -->
     <textarea id="editor"></textarea>
+
+    <div class="navbar navbar-expand-lg fixed-bottom">
+        <div class="container-fluid">
+            <span id="statusBar" class="navbar-text">
+                Line: <span id="lineNumber">1</span>, Column: <span id="columnNumber">1</span>
+            </span>
+        </div>
+    </div>
+
 
     <!-- Room ID Modal -->
     <div class="modal fade" id="roomModal" tabindex="-1" aria-labelledby="roomModalLabel" aria-hidden="true">
@@ -90,6 +102,14 @@
             </div>
         </div>
     </div>
+
+    <div aria-live="polite" aria-atomic="true" class="position-relative">
+        <div id="toast-container" class="toast-container position-fixed end-0 p-3 bottom-0">
+            
+
+        </div>
+    </div>
+
 
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
@@ -127,7 +147,7 @@
         function updateRoomIdInput(id) {
             document.getElementById('roomIdInput').value = id;
         }
-        
+
         function getModeFromExtension(ext) {
             const modeMap = {
                 'js': 'javascript',
@@ -207,6 +227,8 @@
             const cursor = editor.getCursor();
             const selection = editor.listSelections();
             if (hasRoom) socket.emit('cursorChange', { cursor, selection });
+            document.getElementById('lineNumber').textContent = cursor.line + 1;
+            document.getElementById('columnNumber').textContent = cursor.ch + 1;
         });
 
         socket.on('cursorChange', (data) => {
@@ -250,11 +272,6 @@
         function changeTheme(theme = null) {
             const currentTheme = document.body.getAttribute('data-bs-theme');
             const newTheme = theme || (currentTheme === 'light' ? 'dark' : 'light');
-            document.body.setAttribute('data-bs-theme', newTheme);
-            document.getElementById('darkModeToggle').innerHTML = newTheme === 'dark' ? '<i class="bi bi-sun-fill"></i>' : '<i class="bi bi-moon-stars-fill"></i>';
-            document.getElementById('darkModeToggle').setAttribute('aria-label', newTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
-            document.getElementById('darkModeToggle').classList = newTheme === 'dark' ? 'btn btn-outline-light' : 'btn btn-outline-dark';
-            editor.setOption('theme', newTheme === 'dark' ? 'darcula' : 'default');
             localStorage.setItem('theme', newTheme);
 
             for (let id in selections) {
@@ -262,6 +279,19 @@
                     selections[id].clear();
                     selections[id] = null;
                 }
+            }
+
+            for (let i = 0; i < 720; i++) {
+                setTimeout(() => {
+                    document.querySelector('#darkModeToggle div').style.transform = `rotate(${i}deg)`;
+                    if (i == 360 || theme) {
+                        document.body.setAttribute('data-bs-theme', newTheme);
+                        document.getElementById('darkModeToggle').innerHTML = newTheme === 'dark' ? '<div><i id="themeIcon" class="bi bi-sun-fill"></i></div>' : '<div><i id="themeIcon" class="bi bi-moon-stars-fill"></i></div>';
+                        document.getElementById('darkModeToggle').setAttribute('aria-label', newTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
+                        document.getElementById('darkModeToggle').classList = newTheme === 'dark' ? 'btn btn-outline-light' : 'btn btn-outline-dark';
+                        editor.setOption('theme', newTheme === 'dark' ? 'darcula' : 'default');
+                    }
+                }, i * 1);
             }
 
         }
@@ -275,7 +305,7 @@
                 editor.setCursor(currentCursorPos);
                 editor.scrollTo(pagePos.left, pagePos.top);
 
-                
+
             }
         });
 
@@ -291,7 +321,7 @@
                 editor.setOption('mode', { name: 'htmlmixed', scriptTypes: [{ matches: /\/x-handlebars-template|\/x-mustache/i, mode: null }, { matches: /(text|application)\/(x-)?vb(a|script)/i, mode: 'vbscript' }] });
             } else {
                 editor.setOption('mode', language);
-            } 
+            }
             if (hasRoom) socket.emit('languageChange', language);
         });
 
@@ -370,6 +400,62 @@
                 console.error('Failed to copy text: ', err);
             });
         });
+
+        const AUTOSAVE_INTERVAL = 60000; 
+        let autoSaveTimer;
+
+        function showToast(message, success = true) {
+            const toastContainer = document.getElementById('toast-container');
+            const toastEl = document.createElement('div');
+            toastEl.className = `toast align-items-center text-bg-${success ? 'success' : 'danger'} border-0`;
+            toastEl.role = 'alert';
+            toastEl.ariaLive = 'assertive';
+            toastEl.ariaAtomic = 'true';
+            toastEl.innerHTML = `
+        <div class="d-flex">
+            <div class="toast-body">
+                ${message}
+            </div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+    `;
+            toastContainer.appendChild(toastEl);
+            const toast = new bootstrap.Toast(toastEl);
+            toast.show();
+
+            toastEl.addEventListener('hidden.bs.toast', () => {
+                toastEl.remove();
+            });
+        }
+
+        function autoSave() {
+            const content = editor.getValue();
+            localStorage.setItem('editorContent', content);
+            showToast('Changes saved locally');
+        }
+
+        function startAutoSave() {
+            autoSaveTimer = setInterval(autoSave, AUTOSAVE_INTERVAL);
+        }
+
+        function loadFromLocalStorage() {
+            const savedContent = localStorage.getItem('editorContent');
+            if (savedContent) {
+                isLocalChange = true;
+                editor.setValue(savedContent);
+                showToast('Loaded from last session');
+            }
+        }
+
+        window.addEventListener('beforeunload', () => {
+            clearInterval(autoSaveTimer);
+        });
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadFromLocalStorage();
+            startAutoSave();
+        });
+
     </script>
 </body>
 
