@@ -4,38 +4,154 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Collaborative Text Editor</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/codemirror.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/codemirror.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/javascript/javascript.min.js"></script>
     <style>
         .CodeMirror {
-            height: 90vh;
+            height: calc(100vh - 56px);
+        }
+
+        .foreign-cursor {
+            position: absolute;
+            width: 2px;
+            z-index: 10;
+        }
+
+        .foreign-selection {
+            position: absolute;
+            z-index: 5;
         }
     </style>
 </head>
-<body>
+<body data-bs-theme="light">
+    <!-- Toolbar -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">Text Editor</a>
+            <div class="d-flex">
+                <input type="file" id="fileInput" class="btn btn-outline-primary me-2">
+                <button class="btn btn-outline-success me-2" id="downloadBtn">Download File</button>
+                <button class="btn btn-outline-secondary" id="darkModeToggle">Toggle Dark Mode</button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Text Editor -->
     <textarea id="editor"></textarea>
+
     <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
     <script>
         const socket = io();
         const room = prompt("Enter room ID:");
         socket.emit('joinRoom', room);
-    
+
         const editor = CodeMirror.fromTextArea(document.getElementById('editor'), {
             mode: "javascript",
             lineNumbers: true
         });
-    
+
+        const colors = {};
+        const cursors = {};
+        const userColors = [
+            '#FF5733', '#33FF57', '#3357FF', '#F3FF33', '#FF33F3', '#33FFF3', '#F33FFF'
+        ];
+
+        function getRandomColor() {
+            return userColors[Math.floor(Math.random() * userColors.length)];
+        }
+
+        // Gestione del caricamento file
+        document.getElementById('fileInput').addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    editor.setValue(e.target.result);
+                    socket.emit('textChange', editor.getValue());
+                };
+                reader.readAsText(file);
+            }
+        });
+
+        document.getElementById('downloadBtn').addEventListener('click', () => {
+            const text = editor.getValue();
+            const blob = new Blob([text], { type: 'text/plain' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'file.txt';
+            a.click();
+        });
+        
+        document.getElementById('darkModeToggle').addEventListener('click', () => {
+            const currentTheme = document.body.getAttribute('data-bs-theme');
+            const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+            document.body.setAttribute('data-bs-theme', newTheme);
+        });
+
         editor.on('change', () => {
             socket.emit('textChange', editor.getValue());
         });
-    
+
+        editor.on('cursorActivity', () => {
+            const cursor = editor.getCursor();
+            const selection = editor.listSelections();
+            socket.emit('cursorChange', { cursor, selection });
+        });
+
         socket.on('textChange', (data) => {
             if (editor.getValue() !== data) {
+                const currentCursorPos = editor.getCursor();
                 editor.setValue(data);
+                editor.setCursor(currentCursorPos);
+            }
+        });
+
+        socket.on('cursorChange', (data) => {
+            if (!colors[data.id]) {
+                colors[data.id] = getRandomColor();
+            }
+            let cursorElement = cursors[data.id];
+            if (!cursorElement) {
+                cursorElement = document.createElement('div');
+                cursorElement.classList.add('foreign-cursor');
+                cursorElement.style.backgroundColor = colors[data.id];
+                editor.addWidget({ line: data.cursor.line, ch: data.cursor.ch }, cursorElement, false);
+                cursors[data.id] = cursorElement;
+            }
+
+            const coords = editor.charCoords({ line: data.cursor.line, ch: data.cursor.ch }, "local");
+            cursorElement.style.left = coords.left + 'px';
+            cursorElement.style.top = coords.top + 'px';
+            cursorElement.style.height = (coords.bottom - coords.top) + 'px';
+
+            data.selection.forEach((range) => {
+                const selectionElement = document.createElement('div');
+                selectionElement.classList.add('foreign-selection');
+                selectionElement.style.backgroundColor = colors[data.id];
+                selectionElement.style.opacity = 0.3;
+                editor.addWidget({ line: range.anchor.line, ch: range.anchor.ch }, selectionElement, false);
+
+                const startCoords = editor.charCoords({ line: range.anchor.line, ch: range.anchor.ch }, "local");
+                const endCoords = editor.charCoords({ line: range.head.line, ch: range.head.ch }, "local");
+                selectionElement.style.left = startCoords.left + 'px';
+                selectionElement.style.top = startCoords.top + 'px';
+                selectionElement.style.width = (endCoords.left - startCoords.left) + 'px';
+                selectionElement.style.height = (startCoords.bottom - startCoords.top) + 'px';
+
+                setTimeout(() => selectionElement.remove(), 500);
+            });
+        });
+
+        socket.on('cursorRemove', (id) => {
+            if (cursors[id]) {
+                cursors[id].remove();
+                delete cursors[id];
+                delete colors[id];
             }
         });
     </script>
-    
 </body>
 </html>
