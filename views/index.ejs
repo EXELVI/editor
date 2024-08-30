@@ -10,7 +10,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/javascript/javascript.min.js"></script>
     <style>
         .CodeMirror {
-            height: calc(100vh - 56px);
+            height: calc(100vh - 56px); /* Calcola l'altezza rimanente sotto la toolbar */
         }
 
         .foreign-cursor {
@@ -22,6 +22,7 @@
         .foreign-selection {
             position: absolute;
             z-index: 5;
+            opacity: 0.3;
         }
     </style>
 </head>
@@ -53,8 +54,10 @@
             lineNumbers: true
         });
 
+        let isLocalChange = false;
         const colors = {};
         const cursors = {};
+        const selections = {};
         const userColors = [
             '#FF5733', '#33FF57', '#3357FF', '#F3FF33', '#FF33F3', '#33FFF3', '#F33FFF'
         ];
@@ -63,7 +66,6 @@
             return userColors[Math.floor(Math.random() * userColors.length)];
         }
 
-        // Gestione del caricamento file
         document.getElementById('fileInput').addEventListener('change', (event) => {
             const file = event.target.files[0];
             if (file) {
@@ -84,7 +86,7 @@
             a.download = 'file.txt';
             a.click();
         });
-        
+
         document.getElementById('darkModeToggle').addEventListener('click', () => {
             const currentTheme = document.body.getAttribute('data-bs-theme');
             const newTheme = currentTheme === 'light' ? 'dark' : 'light';
@@ -92,7 +94,10 @@
         });
 
         editor.on('change', () => {
-            socket.emit('textChange', editor.getValue());
+            if (!isLocalChange) {
+                socket.emit('textChange', editor.getValue());
+            }
+            isLocalChange = false;
         });
 
         editor.on('cursorActivity', () => {
@@ -103,6 +108,7 @@
 
         socket.on('textChange', (data) => {
             if (editor.getValue() !== data) {
+                isLocalChange = true;
                 const currentCursorPos = editor.getCursor();
                 editor.setValue(data);
                 editor.setCursor(currentCursorPos);
@@ -113,25 +119,26 @@
             if (!colors[data.id]) {
                 colors[data.id] = getRandomColor();
             }
-            let cursorElement = cursors[data.id];
-            if (!cursorElement) {
-                cursorElement = document.createElement('div');
-                cursorElement.classList.add('foreign-cursor');
-                cursorElement.style.backgroundColor = colors[data.id];
-                editor.addWidget({ line: data.cursor.line, ch: data.cursor.ch }, cursorElement, false);
-                cursors[data.id] = cursorElement;
+
+            if (cursors[data.id]) {
+                cursors[data.id].remove();
             }
 
-            const coords = editor.charCoords({ line: data.cursor.line, ch: data.cursor.ch }, "local");
-            cursorElement.style.left = coords.left + 'px';
-            cursorElement.style.top = coords.top + 'px';
-            cursorElement.style.height = (coords.bottom - coords.top) + 'px';
+            let cursorElement = document.createElement('div');
+            cursorElement.classList.add('foreign-cursor');
+            cursorElement.style.backgroundColor = colors[data.id];
+            editor.addWidget({ line: data.cursor.line, ch: data.cursor.ch }, cursorElement, false);
+            cursors[data.id] = cursorElement;
+
+            if (selections[data.id]) {
+                selections[data.id].forEach(sel => sel.remove());
+            }
+            selections[data.id] = [];
 
             data.selection.forEach((range) => {
                 const selectionElement = document.createElement('div');
                 selectionElement.classList.add('foreign-selection');
                 selectionElement.style.backgroundColor = colors[data.id];
-                selectionElement.style.opacity = 0.3;
                 editor.addWidget({ line: range.anchor.line, ch: range.anchor.ch }, selectionElement, false);
 
                 const startCoords = editor.charCoords({ line: range.anchor.line, ch: range.anchor.ch }, "local");
@@ -141,7 +148,7 @@
                 selectionElement.style.width = (endCoords.left - startCoords.left) + 'px';
                 selectionElement.style.height = (startCoords.bottom - startCoords.top) + 'px';
 
-                setTimeout(() => selectionElement.remove(), 500);
+                selections[data.id].push(selectionElement);
             });
         });
 
@@ -149,8 +156,12 @@
             if (cursors[id]) {
                 cursors[id].remove();
                 delete cursors[id];
-                delete colors[id];
             }
+            if (selections[id]) {
+                selections[id].forEach(sel => sel.remove());
+                delete selections[id];
+            }
+            delete colors[id];
         });
     </script>
 </body>
