@@ -24,12 +24,12 @@ io.on('connection', (socket) => {
         if (rooms[room]) {
             socket.emit('textChange', rooms[room].text);
             socket.emit('fileNameChange', rooms[room].fileName);
+            socket.emit('languageChange', rooms[room].language || 'plaintext'); 
             for (const [id, cursor] of Object.entries(rooms[room].cursors)) {
                 socket.emit('cursorChange', { id, ...cursor });
             }
-
         } else {
-            rooms[room] = { text: '', cursors: {}, fileName: 'file.txt' };
+            rooms[room] = { text: '', cursors: {}, fileName: 'file.txt', language: 'plaintext' };
         }
 
         socket.on('textChange', (data) => {
@@ -58,6 +58,11 @@ io.on('connection', (socket) => {
         socket.on("fileNameChange", (fileName) => {
             socket.to(room).emit("fileNameChange", fileName);
             rooms[room].fileName = fileName;
+        });
+
+        socket.on("languageChange", (language) => {
+            socket.to(room).emit("languageChange", language);
+            rooms[room].language = language;
         });
     });
 });

@@ -21,7 +21,7 @@
             position: absolute;
             width: 2px;
             z-index: 10;
-        }
+        } 
 
         .foreign-selection {
             position: absolute;
@@ -33,7 +33,6 @@
         body[data-bs-theme="dark"] .foreign-selection {
             opacity: 0.6;
         }
-        
     </style>
 </head>
 
@@ -41,11 +40,29 @@
     <!-- Toolbar -->
     <nav class="navbar navbar-expand-lg">
         <div class="container-fluid">
-            <a class="navbar-brand" href="#">Text Editor</a>
+            <a class="navbar-brand">Text Editor</a>
             <div class="d-flex">
+                <select id="languageSelect" class="form-select me-2 w-auto">
+                    <option value="plaintext">Plain Text</option>
+                    <option value="javascript">JavaScript</option>
+                    <option value="python">Python</option>
+                    <option value="xml">XML</option>
+                    <option value="htmlmixed">HTML</option>
+                    <option value="css">CSS</option>
+                    <option value="clike">C/C++</option>
+                    <option value="java">Java</option>
+                    <option value="php">PHP</option>
+                    <option value="ruby">Ruby</option>
+                    <option value="shell">Shell</option>
+                    <option value="sql">SQL</option>
+                    <option value="swift">Swift</option>
+                    <option value="yaml">YAML</option>
+                </select>
+
                 <input type="file" id="fileInput" class="btn btn-outline-primary me-2">
                 <button class="btn btn-outline-success me-2" id="downloadBtn">Download File</button>
-                <button class="btn btn-outline-secondary" id="darkModeToggle">Toggle Dark Mode</button>
+                <button class="btn btn-outline-secondary" id="darkModeToggle"><i class="bi bi-moon-stars-fill"></i></button>
+                <button class="btn btn-outline-primary ms-2" id="copyyLinkBtn"><i class="bi bi-link-45deg"></i></button>
             </div>
         </div>
     </nav>
@@ -81,6 +98,7 @@
     <script>
         const socket = io();
         let room = '';
+        let hasRoom = false;
 
         let fileName = 'file.txt';
 
@@ -109,17 +127,27 @@
         function updateRoomIdInput(id) {
             document.getElementById('roomIdInput').value = id;
         }
-
-        function getRoomFromURL() {
-            const urlParams = new URLSearchParams(window.location.search);
-            return urlParams.get('room');
+        
+        function getModeFromExtension(ext) {
+            const modeMap = {
+                'js': 'javascript',
+                'py': 'python',
+                'xml': 'xml',
+                'html': 'htmlmixed',
+                'css': 'css',
+                'c': 'clike',
+                'cpp': 'clike',
+                'java': 'java',
+                'php': 'php',
+                'rb': 'ruby',
+                'sh': 'shell',
+                'sql': 'sql',
+                'swift': 'swift',
+                'yaml': 'yaml'
+            };
+            return modeMap[ext] || 'plaintext';
         }
 
-        const autoJoinRoom = getRoomFromURL();
-        if (autoJoinRoom) {
-            room = autoJoinRoom;
-            socket.emit('joinRoom', room);
-        }
 
         document.getElementById('fileInput').addEventListener('change', (event) => {
             const file = event.target.files[0];
@@ -127,10 +155,18 @@
                 const reader = new FileReader();
                 reader.onload = function (e) {
                     editor.setValue(e.target.result);
-                    socket.emit('textChange', editor.getValue());
-                    socket.emit('fileNameChange', file.name);
+                    if (hasRoom) {
+                        socket.emit('textChange', editor.getValue());
+                        socket.emit('fileNameChange', file.name);
+                    }
                     fileName = file.name;
                     document.getElementById('fileInput').value = '';
+
+                    const ext = file.name.split('.').pop();
+                    const mode = getModeFromExtension(ext);
+                    document.getElementById('languageSelect').value = mode;
+                    editor.setOption('mode', mode);
+                    if (hasRoom) socket.emit('languageChange', mode);
                 };
                 reader.readAsText(file);
             }
@@ -139,7 +175,7 @@
         socket.on('fileNameChange', (name) => {
             fileName = name;
         });
-        
+
         document.getElementById('downloadBtn').addEventListener('click', () => {
             const text = editor.getValue();
             const blob = new Blob([text], { type: 'text/plain' });
@@ -160,15 +196,17 @@
 
         editor.on('change', () => {
             if (!isLocalChange) {
-                socket.emit('textChange', editor.getValue());
+                if (hasRoom) socket.emit('textChange', editor.getValue());
             }
             isLocalChange = false;
         });
 
+
+
         editor.on('cursorActivity', () => {
             const cursor = editor.getCursor();
             const selection = editor.listSelections();
-            socket.emit('cursorChange', { cursor, selection });
+            if (hasRoom) socket.emit('cursorChange', { cursor, selection });
         });
 
         socket.on('cursorChange', (data) => {
@@ -199,7 +237,7 @@
 
         socket.on('cursorRemove', (id) => {
             if (cursors[id]) {
-                cursors[id].clear();    
+                cursors[id].clear();
                 delete cursors[id];
             }
             if (selections[id]) {
@@ -213,6 +251,9 @@
             const currentTheme = document.body.getAttribute('data-bs-theme');
             const newTheme = theme || (currentTheme === 'light' ? 'dark' : 'light');
             document.body.setAttribute('data-bs-theme', newTheme);
+            document.getElementById('darkModeToggle').innerHTML = newTheme === 'dark' ? '<i class="bi bi-sun-fill"></i>' : '<i class="bi bi-moon-stars-fill"></i>';
+            document.getElementById('darkModeToggle').setAttribute('aria-label', newTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
+            document.getElementById('darkModeToggle').classList = newTheme === 'dark' ? 'btn btn-outline-light' : 'btn btn-outline-dark';
             editor.setOption('theme', newTheme === 'dark' ? 'darcula' : 'default');
             localStorage.setItem('theme', newTheme);
 
@@ -222,14 +263,49 @@
                     selections[id] = null;
                 }
             }
+
         }
 
         socket.on('textChange', (data) => {
             if (editor.getValue() !== data) {
                 isLocalChange = true;
                 const currentCursorPos = editor.getCursor();
+                const pagePos = editor.getScrollInfo();
                 editor.setValue(data);
                 editor.setCursor(currentCursorPos);
+                editor.scrollTo(pagePos.left, pagePos.top);
+
+                
+            }
+        });
+
+
+        document.getElementById('languageSelect').addEventListener('change', (event) => {
+            const language = event.target.value;
+            if (language === 'auto') {
+                editor.setOption('mode', null);
+                return;
+            } else if (language === 'plaintext') {
+                editor.setOption('mode', 'null');
+            } else if (language === 'htmlmixed') {
+                editor.setOption('mode', { name: 'htmlmixed', scriptTypes: [{ matches: /\/x-handlebars-template|\/x-mustache/i, mode: null }, { matches: /(text|application)\/(x-)?vb(a|script)/i, mode: 'vbscript' }] });
+            } else {
+                editor.setOption('mode', language);
+            } 
+            if (hasRoom) socket.emit('languageChange', language);
+        });
+
+        socket.on('languageChange', (language) => {
+            document.getElementById('languageSelect').value = language;
+            if (language === 'auto') {
+                editor.setOption('mode', null);
+                return;
+            } else if (language === 'plaintext') {
+                editor.setOption('mode', 'null');
+            } else if (language === 'htmlmixed') {
+                editor.setOption('mode', { name: 'htmlmixed', scriptTypes: [{ matches: /\/x-handlebars-template|\/x-mustache/i, mode: null }, { matches: /(text|application)\/(x-)?vb(a|script)/i, mode: 'vbscript' }] });
+            } else {
+                editor.setOption('mode', language);
             }
         });
 
@@ -247,6 +323,7 @@
         } else {
             room = urlParams.get('room');
             socket.emit('joinRoom', room);
+            hasRoom = true;
         }
 
         document.getElementById('generateIdBtn').addEventListener('click', () => {
@@ -271,9 +348,27 @@
             if (room) {
                 socket.emit('joinRoom', room);
                 roomModal.hide();
+                hasRoom = true;
             } else {
-                alert('Please enter a valid Room ID');
+                if (room != "") {
+                    alert("Please enter a valid room ID");
+                } else {
+                    roomModal.hide();
+                    hasRoom = false;
+                }
             }
+        });
+
+        document.getElementById('copyyLinkBtn').addEventListener('click', () => {
+            const link = `http://localhost:3000/?room=${room}`;
+            navigator.clipboard.writeText(link).then(() => {
+                document.getElementById('copyyLinkBtn').innerHTML = '<i class="bi bi-clipboard-check"></i>';
+                setTimeout(() => {
+                    document.getElementById('copyyLinkBtn').innerHTML = '<i class="bi bi-link-45deg"></i>';
+                }, 1000);
+            }).catch(err => {
+                console.error('Failed to copy text: ', err);
+            });
         });
     </script>
 </body>
