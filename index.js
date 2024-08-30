@@ -55,6 +55,14 @@ io.on('connection', (socket) => {
             }
         });
 
+        socket.on("lockRange", (range) => {
+            socket.to(room).emit("lockRange", range);
+        });
+
+        socket.on("unlockRange", (range) => {
+            socket.to(room).emit("unlockRange", range);
+        });
+
         socket.on("fileNameChange", (fileName) => {
             socket.to(room).emit("fileNameChange", fileName);
             rooms[room].fileName = fileName;
