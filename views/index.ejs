@@ -10,7 +10,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/javascript/javascript.min.js"></script>
     <style>
         .CodeMirror {
-            height: calc(100vh - 56px); /* Calcola l'altezza rimanente sotto la toolbar */
+            height: calc(100vh - 56px); 
         }
 
         .foreign-cursor {
@@ -32,6 +32,7 @@
         <div class="container-fluid">
             <a class="navbar-brand" href="#">Text Editor</a>
             <div class="d-flex">
+                <button class="btn btn-outline-primary me-2" id="generateRoomBtn">Generate Room ID</button>
                 <input type="file" id="fileInput" class="btn btn-outline-primary me-2">
                 <button class="btn btn-outline-success me-2" id="downloadBtn">Download File</button>
                 <button class="btn btn-outline-secondary" id="darkModeToggle">Toggle Dark Mode</button>
@@ -42,12 +43,28 @@
     <!-- Text Editor -->
     <textarea id="editor"></textarea>
 
+    <!-- Room ID Modal -->
+    <div class="modal fade" id="roomModal" tabindex="-1" aria-labelledby="roomModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="roomModalLabel">Enter Room ID</h5>
+                </div>
+                <div class="modal-body">
+                    <input type="text" class="form-control" id="roomIdInput" placeholder="Room ID">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" id="joinRoomBtn">Join Room</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
     <script>
         const socket = io();
-        const room = prompt("Enter room ID:");
-        socket.emit('joinRoom', room);
+        let room = '';
 
         const editor = CodeMirror.fromTextArea(document.getElementById('editor'), {
             mode: "javascript",
@@ -163,6 +180,41 @@
             }
             delete colors[id];
         });
+
+        function generateRandomID() {
+            return Math.random().toString(36).substring(2, 10); 
+        }
+
+        document.getElementById('generateRoomBtn').addEventListener('click', () => {
+            const randomID = generateRandomID();
+            const url = `${window.location.origin}/?room=${randomID}`;
+            navigator.clipboard.writeText(url).then(() => {
+                alert(`Room ID generated and copied to clipboard: ${randomID}`);
+            });
+        });
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const roomParam = urlParams.get('room');
+        if (roomParam) {
+            room = roomParam;
+            socket.emit('joinRoom', room);
+        } else {
+            const roomModal = new bootstrap.Modal(document.getElementById('roomModal'), {
+                backdrop: 'static',
+                keyboard: false
+            });
+            roomModal.show();
+
+            document.getElementById('joinRoomBtn').addEventListener('click', () => {
+                room = document.getElementById('roomIdInput').value.trim();
+                if (room) {
+                    socket.emit('joinRoom', room);
+                    roomModal.hide();
+                } else {
+                    alert('Please enter a valid Room ID');
+                }
+            });
+        }
     </script>
 </body>
 </html>
