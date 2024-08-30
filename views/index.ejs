@@ -33,6 +33,7 @@
         body[data-bs-theme="dark"] .foreign-selection {
             opacity: 0.6;
         }
+        
     </style>
 </head>
 
@@ -81,6 +82,8 @@
         const socket = io();
         let room = '';
 
+        let fileName = 'file.txt';
+
         const editor = CodeMirror.fromTextArea(document.getElementById('editor'), {
             mode: "javascript",
             lineNumbers: true,
@@ -125,27 +128,26 @@
                 reader.onload = function (e) {
                     editor.setValue(e.target.result);
                     socket.emit('textChange', editor.getValue());
+                    socket.emit('fileNameChange', file.name);
+                    fileName = file.name;
+                    document.getElementById('fileInput').value = '';
                 };
                 reader.readAsText(file);
             }
         });
 
+        socket.on('fileNameChange', (name) => {
+            fileName = name;
+        });
+        
         document.getElementById('downloadBtn').addEventListener('click', () => {
             const text = editor.getValue();
             const blob = new Blob([text], { type: 'text/plain' });
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
-            a.download = 'file.txt';
+            a.download = fileName;
             a.click();
         });
-
-        function changeTheme(theme = null) {
-            const currentTheme = document.body.getAttribute('data-bs-theme');
-            const newTheme = theme || (currentTheme === 'light' ? 'dark' : 'light');
-            document.body.setAttribute('data-bs-theme', newTheme);
-            editor.setOption('theme', newTheme === 'dark' ? 'darcula' : 'default');
-            localStorage.setItem('theme', newTheme);
-        }
 
         document.getElementById('darkModeToggle').addEventListener('click', () => {
             changeTheme();
@@ -169,15 +171,6 @@
             socket.emit('cursorChange', { cursor, selection });
         });
 
-        socket.on('textChange', (data) => {
-            if (editor.getValue() !== data) {
-                isLocalChange = true;
-                const currentCursorPos = editor.getCursor();
-                editor.setValue(data);
-                editor.setCursor(currentCursorPos);
-            }
-        });
-
         socket.on('cursorChange', (data) => {
             if (!colors[data.id]) {
                 colors[data.id] = getRandomColor();
@@ -187,54 +180,60 @@
                 cursors[data.id].clear();
             }
 
-            let cursorElement = document.createElement('div');
-            cursorElement.classList.add('foreign-cursor');
-            cursorElement.style.backgroundColor = colors[data.id];
-
-            cursorElement.style.marginLeft = '1px';
-
-            const cursorPosition = editor.charCoords(data.cursor, "local");
-            cursorElement.style.left = cursorPosition.left + 'px';
-            cursorElement.style.top = cursorPosition.top + 'px';
-            cursorElement.style.height = (cursorPosition.bottom - cursorPosition.top) + 'px';
-
-            editor.addWidget(data.cursor, cursorElement, false);
-            cursors[data.id] = cursorElement;
+            cursors[data.id] = editor.markText(
+                { line: data.cursor.line, ch: data.cursor.ch },
+                { line: data.cursor.line, ch: data.cursor.ch + 1 },
+                { className: 'foreign-cursor', css: `border-left: 2px solid ${colors[data.id]};` }
+            );
 
             if (selections[data.id]) {
                 selections[data.id].clear();
             }
 
-            selections[data.id] = [];
-            data.selection.forEach((range) => {
-                const selectionElement = document.createElement('div');
-                selectionElement.classList.add('foreign-selection');
-                selectionElement.style.backgroundColor = colors[data.id];
-
-                const startCoords = editor.charCoords(range.anchor, "local");
-                const endCoords = editor.charCoords(range.head, "local");
-
-                selectionElement.style.left = startCoords.left + 'px';
-                selectionElement.style.top = startCoords.top + 'px';
-                selectionElement.style.width = Math.abs(endCoords.left - startCoords.left) + 'px';
-                selectionElement.style.height = (startCoords.bottom - startCoords.top) + 'px';
-
-                editor.addWidget(range.anchor, selectionElement, false);
-                selections[data.id].push(selectionElement);
-            });
+            selections[data.id] = editor.markText(
+                { line: data.selection[0].anchor.line, ch: data.selection[0].anchor.ch },
+                { line: data.selection[0].head.line, ch: data.selection[0].head.ch },
+                { className: 'foreign-selection', css: `background-color: ${colors[data.id]}; opacity: 0.4;` }
+            );
         });
 
         socket.on('cursorRemove', (id) => {
             if (cursors[id]) {
-                cursors[id].remove();
+                cursors[id].clear();    
                 delete cursors[id];
             }
             if (selections[id]) {
-                selections[id].forEach(sel => sel.remove());
+                selections[id].clear();
                 delete selections[id];
             }
             delete colors[id];
         });
+
+        function changeTheme(theme = null) {
+            const currentTheme = document.body.getAttribute('data-bs-theme');
+            const newTheme = theme || (currentTheme === 'light' ? 'dark' : 'light');
+            document.body.setAttribute('data-bs-theme', newTheme);
+            editor.setOption('theme', newTheme === 'dark' ? 'darcula' : 'default');
+            localStorage.setItem('theme', newTheme);
+
+            for (let id in selections) {
+                if (selections[id]) {
+                    selections[id].clear();
+                    selections[id] = null;
+                }
+            }
+        }
+
+        socket.on('textChange', (data) => {
+            if (editor.getValue() !== data) {
+                isLocalChange = true;
+                const currentCursorPos = editor.getCursor();
+                editor.setValue(data);
+                editor.setCursor(currentCursorPos);
+            }
+        });
+
+
 
         const roomModal = new bootstrap.Modal(document.getElementById('roomModal'), {
             backdrop: 'static',

@@ -23,8 +23,13 @@ io.on('connection', (socket) => {
 
         if (rooms[room]) {
             socket.emit('textChange', rooms[room].text);
+            socket.emit('fileNameChange', rooms[room].fileName);
+            for (const [id, cursor] of Object.entries(rooms[room].cursors)) {
+                socket.emit('cursorChange', { id, ...cursor });
+            }
+
         } else {
-            rooms[room] = { text: '', cursors: {} };
+            rooms[room] = { text: '', cursors: {}, fileName: 'file.txt' };
         }
 
         socket.on('textChange', (data) => {
@@ -43,6 +48,16 @@ io.on('connection', (socket) => {
                 socket.to(room).emit('cursorRemove', socket.id);
             }
             console.log('user disconnected');
+
+            if (Object.keys(rooms[room]?.cursors || []).length === 0) {
+                delete rooms[room];
+                console.log('room deleted');
+            }
+        });
+
+        socket.on("fileNameChange", (fileName) => {
+            socket.to(room).emit("fileNameChange", fileName);
+            rooms[room].fileName = fileName;
         });
     });
 });
